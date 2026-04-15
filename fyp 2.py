@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta
 st.set_page_config(page_title="Sistem Pinjaman Alat Ukur PUO", layout="wide", page_icon="🏗️")
 
 # --- TUKAR KE V6 UNTUK SELESAIKAN ERROR TABLE SEJARAH ---
-DB_FILE = "sistem_puo_v7.db"
+DB_FILE = "database_baru_final.db"
 LIMIT_JAM = 3 
 
 STAFF_USER = "admin"
