@@ -8,202 +8,161 @@ from datetime import date, datetime, timedelta
 # 1. KONFIGURASI PAGE
 st.set_page_config(page_title="Sistem Pinjaman Alat Ukur PUO", layout="wide", page_icon="🏗️")
 
-# NAMA DATABASE
-DB_FILE = "database_final_v1.db"
+DB_FILE = "sistem_pinjaman.db"
 LIMIT_JAM = 3 
 
-# KREDENTIAL ADMIN
+# Kredential Staf/Admin
 STAFF_USER = "admin"
 STAFF_PASS = "puo123"
 
-# 2. FUNGSI DATABASE (DIBAIKI UNTUK ERROR SAHAJA)
+# 2. FUNGSI DATABASE
 def init_db():
-    # check_same_thread=False ditambah untuk mengelak ralat Streamlit
-    with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
-        c = conn.cursor()
-        # Table Alatan
-        c.execute('''CREATE TABLE IF NOT EXISTS alatan (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        alat TEXT UNIQUE,
-                        status TEXT,
-                        peminjam TEXT,
-                        kelas TEXT,
-                        tarikh TEXT,
-                        masa_tamat TEXT,
-                        disahkan INTEGER DEFAULT 0
-                    )''')
-        # Table Sejarah
-        c.execute('''CREATE TABLE IF NOT EXISTS sejarah (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        alat TEXT,
-                        nama TEXT,
-                        kelas TEXT,
-                        aksi TEXT,
-                        waktu TEXT
-                    )''')
-        
-        c.execute("SELECT COUNT(*) FROM alatan")
-        if c.fetchone()[0] == 0:
-            alatan_master = [
-                "TS141", "TS741", "TS140", "TS WAKAF", "PRISM 1", "PRISM 2", "PRISM 3", "PRISM 4", 
-                "PRISM 5", "PRISM 6", "PRISM 7", "PRISM 8", "TRIPOD 100", "TRIPOD 84", "TRIPOD 24", 
-                "TRIPOD 60", "TRIPOD 67", "TRIPOD 97", "TRIPOD 10", "TRIPOD 38", "TRIPOD 27", 
-                "SUN FILTER 1", "SUN FILTER 2", "SUN FILTER 3", "SUN FILTER 4", "STAFF 1", "STAFF 2", "STAFF 3"
-            ]
-            for alat in alatan_master:
-                c.execute("INSERT OR IGNORE INTO alatan (alat, status, peminjam, kelas, tarikh, masa_tamat, disahkan) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                          (alat, "Tersedia", "-", "-", "-", "-", 0))
-            conn.commit()
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS alatan (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    alat TEXT UNIQUE,
+                    status TEXT,
+                    peminjam TEXT,
+                    kelas TEXT,
+                    tarikh TEXT,
+                    masa_tamat TEXT
+                )''')
+    
+    c.execute("SELECT COUNT(*) FROM alatan")
+    if c.fetchone()[0] == 0:
+        alatan_master = [
+            "TS141", "TS741", "TS140", "TS WAKAF", "PRISM 1", "PRISM 2", "PRISM 3", "PRISM 4", 
+            "PRISM 5", "PRISM 6", "PRISM 7", "PRISM 8", "TRIPOD 100", "TRIPOD 84", "TRIPOD 24", 
+            "TRIPOD 60", "TRIPOD 67", "TRIPOD 97", "TRIPOD 10", "TRIPOD 38", "TRIPOD 27", 
+            "SUN FILTER 1", "SUN FILTER 2", "SUN FILTER 3", "SUN FILTER 4", "STAFF 1", "STAFF 2", "STAFF 3"
+        ]
+        for alat in alatan_master:
+            c.execute("INSERT INTO alatan (alat, status, peminjam, kelas, tarikh, masa_tamat) VALUES (?, ?, ?, ?, ?, ?)",
+                      (alat, "Tersedia", "-", "-", "-", "-"))
+    conn.commit()
+    conn.close()
 
-def get_data(table="alatan"):
-    with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
-        return pd.read_sql_query(f"SELECT * FROM {table}", conn)
+def get_data_from_db():
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query("SELECT * FROM alatan", conn)
+    conn.close()
+    return df
 
-def rekod_sejarah(alat, nama, kelas, aksi):
-    with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
-        c = conn.cursor()
-        waktu = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        c.execute("INSERT INTO sejarah (alat, nama, kelas, aksi, waktu) VALUES (?, ?, ?, ?, ?)",
-                  (alat, nama, kelas, aksi, waktu))
-        conn.commit()
+def proses_update_db(alat_list, status, peminjam="-", kelas="-", tarikh="-", masa_tamat="-"):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    for alat in alat_list:
+        c.execute('''UPDATE alatan SET status=?, peminjam=?, kelas=?, tarikh=?, masa_tamat=? 
+                     WHERE alat=?''', (status, peminjam, kelas, tarikh, masa_tamat, alat))
+    conn.commit()
+    conn.close()
 
-def hantar_permohonan(alat_list, nama, matrik, kelas):
-    with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
-        c = conn.cursor()
-        tarikh_skrg = date.today().strftime("%d/%m/%Y")
-        for alat in alat_list:
-            # SINI: Kekalkan struktur asal anda
-            c.execute("UPDATE alatan SET status='Menunggu Pengesahan', peminjam=?, kelas=?, tarikh=?, masa_tamat='-', disahkan=0 WHERE alat=?", 
-                      (f"{nama} ({matrik})", kelas, tarikh_skrg, alat))
-            
-            # Rekod sejarah menggunakan cursor yang sama untuk elak lock
-            waktu_rekod = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            c.execute("INSERT INTO sejarah (alat, nama, kelas, aksi, waktu) VALUES (?, ?, ?, ?, ?)",
-                      (alat, nama, kelas, "MOHON PINJAM", waktu_rekod))
-        conn.commit()
-
-def sahkan_oleh_admin(alat):
-    with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
-        c = conn.cursor()
-        # Timer mula bila admin tekan TICK (ikut limit jam anda)
-        tamat = (datetime.now() + timedelta(hours=LIMIT_JAM)).strftime("%Y-%m-%d %H:%M:%S")
-        c.execute("UPDATE alatan SET status='Dipinjam', disahkan=1, masa_tamat=? WHERE alat=?", (tamat, alat))
-        conn.commit()
-    rekod_sejarah(alat, "-", "-", "DISAHKAN ADMIN")
-
-def pulangkan_alat(alat):
-    with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
-        c = conn.cursor()
-        c.execute("SELECT peminjam, kelas FROM alatan WHERE alat=?", (alat,))
-        res = c.fetchone()
-        p_nama = res[0] if res else "-"
-        p_kelas = res[1] if res else "-"
-        
-        c.execute("UPDATE alatan SET status='Tersedia', peminjam='-', kelas='-', tarikh='-', masa_tamat='-', disahkan=0 WHERE alat=?", (alat,))
-        conn.commit()
-    rekod_sejarah(alat, p_nama, p_kelas, "PULANG")
-
-# INITIALIZE
 init_db()
+df = get_data_from_db()
 
 # 3. SIDEBAR NAVIGATION
-st.sidebar.title("MENU UTAMA")
-menu = st.sidebar.selectbox("Pilih Halaman", ["🏠 STATUS ALAT", "📝 BORANG PINJAMAN", "⏳ TIMER & PEMULANGAN", "🔐 AKSES STAF"])
+st.sidebar.header("MENU NAVIGASI")
+menu = st.sidebar.selectbox("Pilih Halaman", ["🏠 UTAMA", "📝 BORANG PINJAMAN STUDENT", "⏳ STATUS & TIMER", "🔐 AKSES STAF"])
 
-# 4. HALAMAN STATUS
-if menu == "🏠 STATUS ALAT":
+# 4. HALAMAN UTAMA (TAMBAH DATABASE VIEW)
+if menu == "🏠 UTAMA":
     st.title("🏗️ Sistem Pinjaman Alat Ukur PUO")
-    df = get_data()
-    st.subheader("Senarai Inventori & Status Semasa")
-    st.dataframe(df[['alat', 'status', 'peminjam', 'kelas']], use_container_width=True, hide_index=True)
+    st.subheader("Selamat Datang ke Sistem Digital Geomatik")
+    
+    tersedia = len(df[df['status'] == 'Tersedia'])
+    dipinjam = len(df[df['status'] == 'Dipinjam'])
+    
+    col_stat1, col_stat2 = st.columns(2)
+    col_stat1.metric("Alat Tersedia Untuk Dipinjam", f"{tersedia}")
+    col_stat2.metric("Sedang Digunakan", f"{dipinjam}")
+    
+    st.markdown("---")
+    # --- JADUAL DATABASE DI HALAMAN UTAMA ---
+    st.subheader("📁 Jadual Status Inventori Semasa")
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    st.info("Sila ke menu 'Borang Pinjaman' untuk melakukan urusan pinjaman alat.")
 
-# 5. HALAMAN BORANG (STUDENT)
-elif menu == "📝 BORANG PINJAMAN":
-    st.title("📝 Borang Pinjaman Alat")
-    df = get_data()
+# 5. BORANG PINJAMAN STUDENT
+elif menu == "📝 BORANG PINJAMAN STUDENT":
+    st.title("📝 Borang Pinjaman Student")
     senarai_tersedia = df[df['status'] == 'Tersedia']['alat'].tolist()
     
-    with st.form("form_pinjam", clear_on_submit=True):
-        nama = st.text_input("Nama Penuh").upper()
-        matrik = st.text_input("No. Matrik").upper()
-        kelas = st.text_input("Kelas (Contoh: DGU5A)").upper()
-        pilihan = st.multiselect("Pilih Alatan", senarai_tersedia)
-        
-        if st.form_submit_button("HANTAR PERMOHONAN"):
-            if nama and matrik and kelas and pilihan:
-                hantar_permohonan(pilihan, nama, matrik, kelas)
-                st.success("Permohonan berjaya dihantar! Sila jumpa staf untuk pengesahan alat.")
-                time.sleep(1); st.rerun()
-            else:
-                st.error("Sila isi semua ruangan!")
-
-# 6. HALAMAN TIMER
-elif menu == "⏳ TIMER & PEMULANGAN":
-    st.title("⏳ Masa Pinjaman Aktif")
-    df = get_data()
-    # Hanya tunjuk alat yang dah DISAHKAN oleh Admin
-    aktif = df[df['disahkan'] == 1]
-    
-    if aktif.empty:
-        st.info("Tiada alatan yang sedang dipinjam buat masa ini.")
+    if senarai_tersedia:
+        with st.form("form_pinjam", clear_on_submit=True):
+            nama = st.text_input("Nama Penuh").upper()
+            matrik = st.text_input("No. Matrik")
+            kelas = st.text_input("Kelas (e.g. DGU5A)").upper()
+            pilihan_alat = st.multiselect("Pilih Alat-alat yang ingin dipinjam", senarai_tersedia)
+            
+            if st.form_submit_button("SAHKAN PINJAMAN"):
+                if nama and matrik and kelas and pilihan_alat:
+                    waktu_tamat = datetime.now() + timedelta(hours=LIMIT_JAM)
+                    t_str = waktu_tamat.strftime("%Y-%m-%d %H:%M:%S")
+                    d_str = date.today().strftime("%d/%m/%Y")
+                    
+                    proses_update_db(pilihan_alat, "Dipinjam", nama, kelas, d_str, t_str)
+                    st.success("Pinjaman Berjaya!")
+                    st.balloons()
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("Sila isi semua maklumat!")
     else:
-        for _, row in aktif.iterrows():
-            c1, c2, c3 = st.columns([2, 2, 1])
-            with c1:
-                st.write(f"**{row['alat']}**")
-                st.caption(f"👤 {row['peminjam']} | 📍 {row['kelas']}")
-            with c2:
-                # Kira baki masa (Kekalkan Logik Anda)
-                try:
-                    tamat_dt = datetime.strptime(row['masa_tamat'], "%Y-%m-%d %H:%M:%S")
-                    baki = tamat_dt - datetime.now()
-                    if baki.total_seconds() > 0:
-                        st.warning(f"Baki: {str(baki).split('.')[0]}")
-                    else:
-                        st.error("MASA TAMAT")
-                        pulangkan_alat(row['alat']); st.rerun()
-                except:
-                    st.write("Menunggu...")
-            with c3:
-                if st.button("PULANG", key=f"btn_{row['alat']}"):
-                    pulangkan_alat(row['alat']); st.rerun()
-            st.divider()
-    time.sleep(10); st.rerun()
+        st.error("Semua alat sedang dipinjam.")
 
-# 7. HALAMAN ADMIN
+# 6. STATUS & TIMER
+elif menu == "⏳ STATUS & TIMER":
+    st.title("⏳ Pemantauan Baki Masa")
+    waktu_sekarang = datetime.now()
+    dipinjam_df = df[df['status'] == "Dipinjam"]
+    
+    if dipinjam_df.empty:
+        st.write("Tiada alat yang sedang dipinjam.")
+    else:
+        for index, row in dipinjam_df.iterrows():
+            col1, col2, col3 = st.columns([2, 3, 2])
+            with col1:
+                st.write(f"**{row['alat']}**")
+                st.caption(f"👤 {row['peminjam']} ({row['kelas']})")
+            with col2:
+                t_tamat = datetime.strptime(row['masa_tamat'], "%Y-%m-%d %H:%M:%S")
+                baki = t_tamat - waktu_sekarang
+                if baki.total_seconds() > 0:
+                    m, s = divmod(int(baki.total_seconds()), 60)
+                    h, m = divmod(m, 60)
+                    st.warning(f"⏱️ {h:d}j {m:02d}m {s:02d}s")
+                else:
+                    proses_update_db([row['alat']], "Tersedia")
+                    st.rerun()
+            with col3:
+                st.button("PULANG", key=f"btn_{row['alat']}", on_click=proses_update_db, args=([row['alat']], "Tersedia"))
+            st.divider()
+    time.sleep(5)
+    st.rerun()
+
+# 7. AKSES STAF (LOGIN UNTUK DOWNLOAD SAHAJA)
 elif menu == "🔐 AKSES STAF":
     st.title("🔐 Panel Kawalan Staf")
-    user = st.text_input("ID Staf")
-    pw = st.text_input("Kata Laluan", type="password")
     
-    if user == STAFF_USER and pw == STAFF_PASS:
-        st.success("Log Masuk Berjaya.")
-        tab1, tab2, tab3 = st.tabs(["✅ PENGESAHAN (TICK)", "📜 SEJARAH", "📊 DATA MENTAH"])
+    user_in = st.text_input("Username Admin")
+    pass_in = st.text_input("Password Admin", type="password")
+    
+    if user_in == STAFF_USER and pass_in == STAFF_PASS:
+        st.success("Akses Diterima.")
+        st.markdown("---")
         
-        with tab1:
-            st.subheader("Permohonan Menunggu Pengesahan")
-            df = get_data()
-            tunggu = df[df['status'] == "Menunggu Pengesahan"]
-            if tunggu.empty:
-                st.info("Tiada permohonan baru untuk disahkan.")
-            else:
-                for _, row in tunggu.iterrows():
-                    col1, col2, col3 = st.columns([2, 4, 1])
-                    col1.write(f"**{row['alat']}**")
-                    col2.write(f"Peminjam: {row['peminjam']} ({row['kelas']})")
-                    if col3.button("✔️", key=f"tick_{row['alat']}"):
-                        sahkan_oleh_admin(row['alat'])
-                        st.success(f"{row['alat']} Disahkan!")
-                        time.sleep(0.5); st.rerun()
-                    st.divider()
-        
-        with tab2:
-            st.subheader("Rekod Pinjaman Lampau")
-            st.dataframe(get_data("sejarah").sort_values(by='id', ascending=False), use_container_width=True, hide_index=True)
+        # Butang Download hanya ada dalam ni
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, "rb") as f:
+                st.download_button(
+                    label="📥 Muat Turun Fail Database (.db)",
+                    data=f,
+                    file_name="sistem_pinjaman_puo.db",
+                    mime="application/octet-stream"
+                )
+        st.info("Gunakan fail .db ini untuk tujuan audit atau backup data.")
             
-        with tab3:
-            st.subheader("Database Inventori")
-            st.dataframe(get_data(), use_container_width=True)
-            
-    elif user or pw:
-        st.error("ID atau Kata Laluan Salah!")
+    elif user_in or pass_in:
+        st.error("Username atau Password salah!")
