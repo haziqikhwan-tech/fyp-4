@@ -16,9 +16,9 @@ LIMIT_JAM = 3
 STAFF_USER = "admin"
 STAFF_PASS = "puo123"
 
-# 2. FUNGSI DATABASE (DIBETULKAN UNTUK ELAK LOCK)
+# 2. FUNGSI DATABASE (DIBAIKI UNTUK ERROR SAHAJA)
 def init_db():
-    # Guna 'with' supaya connection ditutup automatik
+    # check_same_thread=False ditambah untuk mengelak ralat Streamlit
     with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
         c = conn.cursor()
         # Table Alatan
@@ -72,17 +72,20 @@ def hantar_permohonan(alat_list, nama, matrik, kelas):
         c = conn.cursor()
         tarikh_skrg = date.today().strftime("%d/%m/%Y")
         for alat in alat_list:
-            c.execute("UPDATE alatan SET status='Menunggu Pengesahan', peminjam=?, kelas=?, tarikh=?, disahkan=0 WHERE alat=?", 
+            # SINI: Kekalkan struktur asal anda
+            c.execute("UPDATE alatan SET status='Menunggu Pengesahan', peminjam=?, kelas=?, tarikh=?, masa_tamat='-', disahkan=0 WHERE alat=?", 
                       (f"{nama} ({matrik})", kelas, tarikh_skrg, alat))
-            # Rekod sejarah di sini juga menggunakan cursor yang sama
-            waktu = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            
+            # Rekod sejarah menggunakan cursor yang sama untuk elak lock
+            waktu_rekod = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             c.execute("INSERT INTO sejarah (alat, nama, kelas, aksi, waktu) VALUES (?, ?, ?, ?, ?)",
-                      (alat, f"{nama} ({matrik})", kelas, "MOHON PINJAM", waktu))
+                      (alat, nama, kelas, "MOHON PINJAM", waktu_rekod))
         conn.commit()
 
 def sahkan_oleh_admin(alat):
     with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
         c = conn.cursor()
+        # Timer mula bila admin tekan TICK (ikut limit jam anda)
         tamat = (datetime.now() + timedelta(hours=LIMIT_JAM)).strftime("%Y-%m-%d %H:%M:%S")
         c.execute("UPDATE alatan SET status='Dipinjam', disahkan=1, masa_tamat=? WHERE alat=?", (tamat, alat))
         conn.commit()
@@ -93,11 +96,12 @@ def pulangkan_alat(alat):
         c = conn.cursor()
         c.execute("SELECT peminjam, kelas FROM alatan WHERE alat=?", (alat,))
         res = c.fetchone()
-        peminjam_info = res[0] if res else "-"
-        kelas_info = res[1] if res else "-"
+        p_nama = res[0] if res else "-"
+        p_kelas = res[1] if res else "-"
+        
         c.execute("UPDATE alatan SET status='Tersedia', peminjam='-', kelas='-', tarikh='-', masa_tamat='-', disahkan=0 WHERE alat=?", (alat,))
         conn.commit()
-    rekod_sejarah(alat, peminjam_info, kelas_info, "PULANG")
+    rekod_sejarah(alat, p_nama, p_kelas, "PULANG")
 
 # INITIALIZE
 init_db()
@@ -137,6 +141,7 @@ elif menu == "📝 BORANG PINJAMAN":
 elif menu == "⏳ TIMER & PEMULANGAN":
     st.title("⏳ Masa Pinjaman Aktif")
     df = get_data()
+    # Hanya tunjuk alat yang dah DISAHKAN oleh Admin
     aktif = df[df['disahkan'] == 1]
     
     if aktif.empty:
@@ -148,6 +153,7 @@ elif menu == "⏳ TIMER & PEMULANGAN":
                 st.write(f"**{row['alat']}**")
                 st.caption(f"👤 {row['peminjam']} | 📍 {row['kelas']}")
             with c2:
+                # Kira baki masa (Kekalkan Logik Anda)
                 try:
                     tamat_dt = datetime.strptime(row['masa_tamat'], "%Y-%m-%d %H:%M:%S")
                     baki = tamat_dt - datetime.now()
@@ -157,7 +163,7 @@ elif menu == "⏳ TIMER & PEMULANGAN":
                         st.error("MASA TAMAT")
                         pulangkan_alat(row['alat']); st.rerun()
                 except:
-                    st.write("-")
+                    st.write("Menunggu...")
             with c3:
                 if st.button("PULANG", key=f"btn_{row['alat']}"):
                     pulangkan_alat(row['alat']); st.rerun()
